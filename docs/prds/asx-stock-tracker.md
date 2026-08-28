@@ -39,7 +39,7 @@ All of the above (manual entry, current value/gain-loss, historical charts, divi
 - **Invalid or unknown ASX code:** show an error stating the code was not found.
 
 ## Technical notes
-- **Data storage:** a local data file, reachable from both native Ubuntu and WSL. The exact shared-storage approach (e.g. a path both environments can access on the same machine, vs. syncing across separate machines) is not yet decided — see open questions.
+- **Data storage:** SQLite, owned exclusively by a small request-handling API server (see `docs/architecture/epic-1-foundation.md`) rather than a file opened directly by each environment. The server runs as a persistent service in a Hyper-V Ubuntu VM (this machine's stand-in for "native Ubuntu" — no bare-metal dual boot exists); WSL and any other environment are HTTP clients of it. Chosen over a directly-shared file specifically because it also gives the later multi-computer/multi-user direction (see Non-goals) a client/server boundary to build on, instead of two throwaway architectures.
 - **Price data source:** no ASX API is chosen yet. Recommended default: **Yahoo Finance (unofficial API, `.AX` ticker suffix)** — free, no API key, covers ASX, and provides historical data for the charts requirement in one source. It's unofficial and can break or get rate-limited without notice, so validate with a quick spike before building on it.
 - **Data licensing:** delayed price data (not real-time) is acceptable, which avoids the need for a paid real-time ASX data license.
 - **Data sent externally:** only the ASX code is sent to the price API. Holdings, quantities, and portfolio values stay local.
@@ -72,8 +72,8 @@ All of the above (manual entry, current value/gain-loss, historical charts, divi
 - **No finance domain knowledge:** risk of incorrect gain/loss calculations or misused terminology — may need extra review/validation of the numbers before shipping.
 - **Data leak / privacy risk:** flagged as the top risk, particularly once multi-user support is added in a later version.
 - **Which ASX price API to commit to:** recommended default is Yahoo Finance (`.AX` tickers), pending a short validation spike to confirm reliability and coverage.
-- **Shared data file approach:** the exact mechanism for making the local data file reachable from both native Ubuntu and WSL still needs to be pinned down before implementation starts.
 - **Which TUI framework to use:** not yet chosen — needs a short evaluation before Epic 1 (Foundation) work begins.
+- **Multi-user support (deferred):** when it's built, it should build on the API-server boundary established in Epic 1 (auth + per-user data scoping on top of the existing client/server split) rather than on a re-architecture — no concrete plan yet, flagged here so Epic 1's API-first choice isn't re-litigated from scratch later.
 
 ## Epics
 Build order: Epics 1–4 are the critical path to a usable v1 (TUI app that can replace the spreadsheets). Epics 5–7 can follow in parallel or any order after. Epic 8 is a future iteration, started only after v1 ships.

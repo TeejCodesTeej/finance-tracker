@@ -6,33 +6,54 @@ Source: `docs/prds/asx-stock-tracker.md` (Epic 1) and
 Also tracked as GitHub issues, labeled `epic-1` (this file is the
 archival copy, committed alongside the PRD and architecture doc).
 
-Dependency order: **1 and 2 first (parallel-safe)** → 3, 5, 6 → 4 → 7 → 8.
+**Revision note:** this epic's shape changed after ticket 1 turned up two
+false assumptions — no native Ubuntu dual boot exists (a Hyper-V VM is
+standing in for it), and a directly-shared SQLite file was replaced with a
+request-handling API server (the VM runs the server; every environment,
+including WSL, is a client). See the architecture doc's "Approaches
+considered" for the reasoning. Tickets 3–4 shrank to server-side-only
+concerns, and tickets 6–7 (new) — the API server and API client — didn't
+exist in the original breakdown.
+
+Dependency order: **1 and 2 first (parallel-safe)** → 3, 5 → 4 → 6 → 7 → 8
+→ 9 → 10.
 
 ---
 
-## 1. Spike: confirm shared Ubuntu/WSL storage path
+## 1. Hyper-V Ubuntu VM: stand up + verify WSL reachability
 
-**Labels:** `epic-1`, `spike`
+**Labels:** `epic-1`, `spike`, `blocked`
 
-**Description:** The storage decision (SQLite as one shared local file)
-assumes a partition/drive mounted by both native Ubuntu and WSL already
-exists on this machine — unconfirmed. This is a hands-on check (or setup),
-not code, and unblocks ticket 3.
+**Description:** No bare-metal Ubuntu dual boot exists on this machine —
+confirmed. This ticket replaces the original "confirm the shared mount"
+spike with the real setup work: build the Hyper-V VM that stands in for
+"native Ubuntu," and confirm WSL can reach it over the network (needed
+because the storage decision is now a request-handling API server hosted in
+the VM — see architecture doc). This is hands-on setup, not code, and is
+being **captured as a plan now, executed separately** rather than done
+inside a planning session.
 
 **Acceptance criteria:**
-- Confirm whether a partition/drive is currently mounted and writable from
-  both native Ubuntu and WSL on this machine.
-- If yes: document the exact path on each OS side (native Ubuntu path vs.
-  the path WSL sees it at).
-- If no: document what setting one up would take, and either do it or flag
-  it as a blocker with a fallback recommendation.
+- Confirm Hyper-V is enabled on this Windows host (Pro edition, so
+  supported; the feature/service appears to already be present based on
+  how `Get-VM`/`Get-VMSwitch` failed — unauthorized rather than "not
+  found" — but this needs an elevated check to be sure). Enable it if not.
+- Create a Hyper-V VM, install Ubuntu, give it a static IP or a fixed DHCP
+  reservation (the server needs a stable address).
+- Confirm WSL can reach the VM's IP (default WSL NAT networking and a
+  Hyper-V VM's default switch are separate private networks — this may
+  need an External virtual switch, or WSL mirrored-networking mode, to
+  bridge them). Document whichever fix was needed, if any.
 - Write the findings into `docs/architecture/epic-1-foundation.md`'s "Open
-  questions" section, replacing the mount-point open question.
+  questions" section, replacing the networking open question.
 
 **Dependencies:** none.
-**Size:** S (a few hours).
-**Verification:** `touch` a test file from native Ubuntu, confirm it's
-visible from WSL at the documented path, and vice versa.
+**Size:** M (VM + OS install + networking troubleshooting — larger than
+the original spike estimate; do this outside a chat session).
+**Verification:** from WSL, `curl`/`ping` the VM's IP on a test port and
+get a response; from the VM, confirm it can see WSL isn't required (WSL is
+a client only) but confirm the VM's own network config is stable across a
+VM restart.
 
 ---
 
@@ -41,54 +62,56 @@ visible from WSL at the documented path, and vice versa.
 **Labels:** `epic-1`
 
 **Description:** Stand up the Python project per the architecture doc's
-stack decision (Python + Textual + stdlib `sqlite3`, packaged with `uv`),
-with the four-layer structure (core domain → storage → external
-data-source seam → TUI presentation) so later epics have a home for their
-code without restructuring.
+stack decision (Python + Textual + stdlib `sqlite3` + FastAPI, packaged
+with `uv`), with the five-layer structure (core domain → storage →
+external data-source seam → API server/client → TUI presentation) so later
+epics have a home for their code without restructuring.
 
 **Acceptance criteria:**
-- `uv`-managed project: `pyproject.toml` + lockfile, Textual as a
-  dependency.
-- Module layout reflecting the four layers, e.g.
-  `finance_tracker/{domain,storage,datasource,tui}/`, each with a
-  placeholder `__init__.py`.
-- A console-script entry point (e.g. `finance-tracker`) that runs.
+- `uv`-managed project: `pyproject.toml` + lockfile, Textual and FastAPI as
+  dependencies.
+- Module layout reflecting the five layers, e.g.
+  `finance_tracker/{domain,storage,datasource,api,tui}/`, each with a
+  placeholder `__init__.py`. `api/` holds both the server (ticket 6) and
+  the client (ticket 7).
+- A console-script entry point for the TUI (e.g. `finance-tracker`) and a
+  separate one for the server (e.g. `finance-tracker-server`) that run.
 - README with the one-command dev setup (`uv sync`, `uv run
-  finance-tracker`).
+  finance-tracker`, `uv run finance-tracker-server`).
 - Linter/formatter wired (e.g. `ruff`) — engineer's call on exact tool.
 
 **Dependencies:** none.
 **Size:** M (~half day).
-**Verification:** fresh clone, `uv sync && uv run finance-tracker`
-succeeds on both a native Ubuntu and a WSL terminal.
+**Verification:** fresh clone, `uv sync` succeeds; both entry points run
+(the server as a no-op stub is fine at this stage) on a WSL terminal.
 
 ---
 
-## 3. Data path resolution module
+## 3. Data path resolution module (server-side)
 
 **Labels:** `epic-1`
 
 **Description:** Implement the module that decides where the SQLite file
 lives, per the architecture doc's explicit (never-guessed) precedence
-order, plus the first-run WSL notice.
+order. This now runs **only inside the API server process** on the
+Hyper-V VM — no other environment resolves a data path, since no other
+environment touches the file. The original WSL first-run notice is
+dropped: WSL never has a local-only default to warn about anymore, because
+it never resolves a data path at all.
 
 **Acceptance criteria:**
 - Precedence implemented exactly: `FINANCE_TRACKER_DATA_DIR` env var →
   `~/.config/finance-tracker/config.toml` → XDG default
   (`~/.local/share/finance-tracker/`).
 - Isolated in one module — nothing else in the codebase reads env/OS
-  directly to find the data path.
-- Running under WSL with no explicit override shows a first-run notice
-  that the default is local-only and won't be seen from native Ubuntu,
-  pointing at the shared path from ticket 1.
-- Unit tests cover each precedence level and the WSL-notice branch.
+  directly to find the data path, and nothing outside the server process
+  imports this module at all.
+- Unit tests cover each precedence level.
 
-**Dependencies:** 1 (real mount-point info for the notice text), 2
-(scaffold to build in).
-**Size:** M.
+**Dependencies:** 2 (scaffold to build in).
+**Size:** S (shrank — no WSL-notice branch to build or test anymore).
 **Verification:** exercise each override method set/unset and confirm the
-resolved path; run under WSL with nothing configured and confirm the
-notice appears.
+resolved path.
 
 ---
 
@@ -99,7 +122,8 @@ notice appears.
 **Description:** Storage-layer foundation — opens/creates the SQLite file
 at the resolved data path and provides a small migration runner keyed off
 a `schema_version` table, so later epics add their own tables without a
-heavier migration framework.
+heavier migration framework. Lives entirely inside the API server process
+(ticket 6) — this module is never imported by the TUI or any client.
 
 **Acceptance criteria:**
 - Opens/creates the SQLite file at the path from ticket 3.
@@ -113,8 +137,9 @@ heavier migration framework.
 
 **Dependencies:** 2, 3.
 **Size:** M.
-**Verification:** delete the local DB, run the app, confirm the file and
-`schema_version` table are created; run again, confirm no duplicate work.
+**Verification:** on the VM, delete the local DB, run the server, confirm
+the file and `schema_version` table are created; run again, confirm no
+duplicate work.
 
 ---
 
@@ -124,7 +149,9 @@ heavier migration framework.
 
 **Description:** Leave the boundary in place per the architecture doc so
 Epic 2's price-fetch work doesn't require restructuring — a thin interface
-in the `datasource` layer, no real implementation yet.
+in the `datasource` layer, no real implementation yet. Unaffected by the
+API-server change (it's a boundary the server's domain layer will call
+into, not something clients reach directly).
 
 **Acceptance criteria:**
 - Interface module (e.g. `datasource/price_source.py`) defining the
@@ -142,19 +169,74 @@ confirm the interface shape is usable.
 
 ---
 
-## 6. Minimal Textual TUI skeleton
+## 6. Request-handling API server
+
+**Labels:** `epic-1`
+
+**Description:** *(New — didn't exist in the original breakdown.)* The
+server that is the sole owner of the SQLite file. Runs as a systemd
+service inside the Hyper-V VM (ticket 1). Exposes domain operations over
+HTTP (FastAPI); the storage layer (ticket 4) is only ever called from
+inside this process.
+
+**Acceptance criteria:**
+- FastAPI app wired to the domain/storage layers from tickets 3–4.
+- At least one real endpoint proving the full path works end-to-end (e.g.
+  a health/version check that reads `schema_version` from the DB and
+  returns it) — full domain endpoints (holdings, etc.) land in their
+  owning epics.
+- Runs as a systemd unit on the VM: starts on boot, restarts on crash,
+  independent of any logged-in session.
+- Unauthenticated for v1 (single user, single trusted machine) — noted
+  explicitly as a decision to revisit when multi-user support is built,
+  not an oversight.
+
+**Dependencies:** 2, 4.
+**Size:** M.
+**Verification:** on the VM, `systemctl status` shows the service running
+after a reboot with no manual start; `curl localhost:<port>/<health-path>`
+returns the expected value.
+
+---
+
+## 7. API client module
+
+**Labels:** `epic-1`
+
+**Description:** *(New.)* Thin HTTP client the TUI (and any future client)
+uses to talk to the server from ticket 6. This is what "storage" means
+from the TUI's point of view from now on — the TUI never imports the
+storage or domain-DB modules directly.
+
+**Acceptance criteria:**
+- Client module wrapping HTTP calls to the server's endpoints (starting
+  with whatever ticket 6 exposes).
+- Server URL is itself configured, not guessed, mirroring ticket 3's
+  pattern: `FINANCE_TRACKER_API_URL` env var → config file → a documented
+  default (e.g. the VM's static IP:port once ticket 1 fixes it).
+- Isolated in one module — nothing else in the TUI layer makes raw HTTP
+  calls to the server.
+
+**Dependencies:** 2, 6 (needs at least one real endpoint to call against).
+**Size:** S.
+**Verification:** from WSL, call the client against the server running on
+the VM, confirm the response matches what `curl` gets directly.
+
+---
+
+## 8. Minimal Textual TUI skeleton
 
 **Labels:** `epic-1`
 
 **Description:** A running Textual app with one placeholder screen,
-proving the TUI stack works end-to-end on both native Ubuntu and WSL
-terminals — no stock features yet.
+proving the TUI stack works end-to-end on both native Ubuntu (the VM) and
+WSL terminals — no stock features yet.
 
 **Acceptance criteria:**
 - Textual `App` subclass with one screen showing static placeholder
   content (app name/version).
 - Launched via the entry point from ticket 2.
-- Renders correctly in both a native Ubuntu terminal and a WSL terminal.
+- Renders correctly in both a WSL terminal and a terminal on the VM.
 - Basic keybinding works (e.g. `q` to quit).
 
 **Dependencies:** 2.
@@ -164,46 +246,52 @@ rendering and that quit works.
 
 ---
 
-## 7. Wire the skeleton end-to-end
+## 9. Wire the skeleton end-to-end
 
 **Labels:** `epic-1`
 
-**Description:** Connect TUI → domain → storage so the layers actually
-talk to each other, not just exist side by side — e.g. the placeholder
-screen displays the `schema_version` read through the storage module.
+**Description:** Connect TUI → API client → API server → domain → storage
+so the layers actually talk to each other, not just exist side by side —
+e.g. the placeholder screen displays the `schema_version` the server reads
+through storage.
 
 **Acceptance criteria:**
-- TUI screen calls into the storage module (via the domain layer, even if
-  currently a pass-through) and displays a real value from the DB.
-- Confirms the full path: TUI → domain → storage → SQLite file at the
-  resolved data path.
-- No direct SQL or path-resolution calls from the TUI layer.
+- TUI screen calls the API client (ticket 7), which calls the server
+  (ticket 6), which reads a real value from the DB through storage (ticket
+  4), and displays it.
+- Confirms the full path: TUI → API client → HTTP → API server → domain →
+  storage → SQLite file on the VM.
+- No direct storage, domain-DB, or raw-SQL calls from the TUI layer — only
+  through the API client.
 
-**Dependencies:** 4, 6.
+**Dependencies:** 6, 7, 8.
 **Size:** S.
-**Verification:** run the app, confirm the displayed value matches the DB
-file's actual contents (spot-check with the `sqlite3` CLI).
+**Verification:** run the TUI from WSL against the server on the VM,
+confirm the displayed value matches the DB file's actual contents
+(spot-check with the `sqlite3` CLI on the VM).
 
 ---
 
-## 8. Epic 1 exit verification
+## 10. Epic 1 exit verification
 
 **Labels:** `epic-1`
 
-**Description:** Confirm the epic's actual goal — a shared data file
-reachable from both OSes — is real, not aspirational, by running the
-wired-up skeleton from both sides against the same file.
+**Description:** Confirm the epic's actual goal — one source of truth
+reachable from both WSL and "native Ubuntu" — is real, not aspirational,
+by running the TUI as a client from both environments against the one
+server.
 
 **Acceptance criteria:**
-- Run the app from native Ubuntu, then from WSL, both pointed at the
-  shared path from ticket 1.
+- Run the TUI from WSL, then from a terminal on the Hyper-V VM itself,
+  both pointed at the same server (running on the VM).
 - Write something identifiable from one side, read it back from the
-  other — confirms both see the same DB state.
+  other — confirms both see the same DB state through the server, not
+  through any file-level trick.
 - Update `docs/architecture/epic-1-foundation.md`'s "Open questions" to
-  close out anything resolved by tickets 1 and 3.
+  close out anything resolved by tickets 1 and 6–7.
 - Short sign-off note confirming Epic 1 is ready for Epic 2 to build on.
 
-**Dependencies:** 1, 3, 4, 7.
+**Dependencies:** 1, 6, 7, 9.
 **Size:** S (mostly manual verification + a small doc update).
 **Verification:** the ticket's own steps are the verification for the
 whole epic.

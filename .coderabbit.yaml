@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit config for finance-tracker (solo dev, no other reviewers —
+# this is the main second pair of eyes on every PR).
+# Docs: https://docs.coderabbit.ai/getting-started/configure-coderabbit
+
+language: "en-US"
+
+reviews:
+  # Assertive over chill: the PRD flags "no finance domain knowledge" as a
+  # named risk (gain/loss math, dividend/franking-credit handling), so err
+  # toward more thorough review rather than fewer nitpicks.
+  profile: "assertive"
+
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: true
+  auto_title_instructions: ""
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!**/uv.lock"
+    - "!**/.venv/**"
+    - "!**/__pycache__/**"
+    - "!**/*.db"
+    - "!**/*.sqlite3"
+
+  path_instructions:
+    - path: "**/*.py"
+      instructions: >
+        This project follows a layered architecture (see
+        docs/architecture/epic-1-foundation.md): core domain logic →
+        storage → external data-source seam → TUI presentation. Flag any
+        change where a layer reaches past its neighbor — e.g. TUI code
+        calling sqlite/storage directly, or domain logic importing the
+        Textual/TUI layer.
+
+    - path: "**/datasource/**"
+      instructions: >
+        Per the PRD, only the ASX code may cross this boundary to the
+        external price API — holdings, quantities, and portfolio values
+        must stay local. Flag anything in this layer that sends more than
+        the code out, or that lacks the live-vs-last-known-price handling
+        for API-down/market-closed states.
+
+    - path: "**/domain/**"
+      instructions: >
+        Flag any gain/loss, dividend, or valuation calculation that looks
+        financially incorrect or unit-inconsistent (e.g. mixing cents and
+        dollars, ignoring quantity, off-by-one date handling) — no one on
+        this project has finance domain background, so these need extra
+        scrutiny rather than being taken on faith.
+
+  tools:
+    ruff:
+      enabled: true
+
+chat:
+  auto_reply: true

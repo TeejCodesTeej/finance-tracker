@@ -18,6 +18,25 @@ exist in the original breakdown.
 Dependency order: **1 and 2 first (parallel-safe)** → 3, 5 → 4 → 6 → 7 → 8
 → 9 → 10.
 
+**Ticket number ↔ GitHub issue number:** these no longer match 1:1 for
+tickets 6–10. Issues #1–#5 were updated in place and kept their numbers;
+#6–#8 were closed as superseded (their scope moved or got replaced); #9
+went to the PR that made this revision. The new tickets landed on whatever
+issue numbers came next:
+
+| Ticket | GitHub issue |
+|---|---|
+| 1 | [#1](https://github.com/TeejCodesTeej/finance-tracker/issues/1) |
+| 2 | [#2](https://github.com/TeejCodesTeej/finance-tracker/issues/2) |
+| 3 | [#3](https://github.com/TeejCodesTeej/finance-tracker/issues/3) |
+| 4 | [#4](https://github.com/TeejCodesTeej/finance-tracker/issues/4) |
+| 5 | [#5](https://github.com/TeejCodesTeej/finance-tracker/issues/5) |
+| 6 | [#10](https://github.com/TeejCodesTeej/finance-tracker/issues/10) |
+| 7 | [#11](https://github.com/TeejCodesTeej/finance-tracker/issues/11) |
+| 8 | [#12](https://github.com/TeejCodesTeej/finance-tracker/issues/12) |
+| 9 | [#13](https://github.com/TeejCodesTeej/finance-tracker/issues/13) |
+| 10 | [#14](https://github.com/TeejCodesTeej/finance-tracker/issues/14) |
+
 ---
 
 ## 1. Hyper-V Ubuntu VM: stand up + verify WSL reachability

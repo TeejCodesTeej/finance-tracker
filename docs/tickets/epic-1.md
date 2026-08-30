@@ -26,7 +26,8 @@ everything inside WSL rather than on the VM. Ticket numbering and the
 GitHub issue
 mapping are kept stable rather than renumbered.
 
-Dependency order: **2 first** → 3, 5 → 4 → 6 → 7 → 8 → 9 → 10. (Ticket 1
+Dependency order: **2 first** → {3, 5, 8} (parallel-safe — each only
+depends on 2) → 4 → 6 → 7 → 9 (needs 6, 7, *and* 8) → 10. (Ticket 1
 deferred — no longer a dependency of anything in this list.)
 
 **Ticket number ↔ GitHub issue number:** these no longer match 1:1 for

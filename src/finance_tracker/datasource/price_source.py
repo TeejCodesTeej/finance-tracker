@@ -51,6 +51,12 @@ class StubPriceSource:
     """
 
     def fetch_price(self, asx_code: str) -> PriceQuote:
+        """Always raise — no real price source is wired up yet.
+
+        Lets callers wire against the `PriceSource` seam now; Epic 2
+        replaces this with a real implementation (e.g. a Yahoo Finance
+        client).
+        """
         raise NotImplementedError(
             "Price data source not implemented yet — lands in Epic 2."
         )

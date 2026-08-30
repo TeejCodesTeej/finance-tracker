@@ -20,6 +20,9 @@ def test_stub_fetch_price_raises_not_implemented() -> None:
 
 
 def test_price_quote_only_takes_the_documented_fields() -> None:
+    """`PriceQuote` exposes exactly the four documented fields, matching
+    the contract that only the ASX code crosses the price-source boundary.
+    """
     quote = PriceQuote(
         asx_code="BHP",
         price=45.67,

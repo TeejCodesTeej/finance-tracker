@@ -4,10 +4,18 @@
 ## Problem & goals
 The PRD leaves three foundational calls open before any epic can start: the
 language/TUI stack, a stack that won't paint us into a corner for the future
-GTK/Qt GUI (Epic 8), and how the local data file is reached from both native
-Ubuntu and WSL on the same machine. Epic 1's goal is to close those out and
-stand up a minimal running skeleton — no stock features yet — that later
-epics build on without re-litigating the foundation.
+GTK/Qt GUI (Epic 8), and how the local data is stored and reached. Epic 1's
+goal is to close those out and stand up a minimal running skeleton — no
+stock features yet — that later epics build on without re-litigating the
+foundation.
+
+**Scope reduction (this revision):** native Ubuntu (the Hyper-V VM standing
+in for it) is deferred to a later version so a working WSL-only version
+ships first. Everything below — TUI, API server, SQLite file — runs inside
+WSL alone for this version; there is no second environment to reach yet.
+The API-server architecture is kept regardless (see "Sharing that storage"
+below) because it's still the right foundation for the multi-user future
+even with only one environment today.
 
 ## Approaches considered
 
@@ -41,43 +49,45 @@ for the future GUI:
 **Sharing that storage between WSL and "native Ubuntu"** — the assumption
 this doc originally shipped with (a bare-metal Ubuntu dual boot exists on
 this machine, so the fix is just mounting the same partition twice) turned
-out to be false: there is no dual boot. The actual plan is a **Hyper-V VM
-running Ubuntu** standing in for "native Ubuntu." That changes the sharing
-problem from "two OSes mounting one physical disk" to "two separate guest
-OSes on one Windows host," which rules out a directly dual-mounted
-partition and puts any file-sharing option (SMB, NFS) into SQLite's own
-documented danger zone: it explicitly warns against network filesystems for
-locking correctness. Options evaluated:
-- *SMB share + app-level lock file* — WSL and the VM both mount a Windows
-  SMB share and open the SQLite file directly; a heartbeat lock file guards
-  against two environments opening it at once (SQLite's own OS-level
-  locking isn't trusted over SMB, so the guard is done at the app level).
-  Workable, but only protects against the concurrent-open case by policy,
-  not architecture — and it's throwaway once multi-computer access is
+out to be false: there is no dual boot. The follow-up plan was a **Hyper-V
+VM running Ubuntu** standing in for "native Ubuntu," which changes the
+sharing problem from "two OSes mounting one physical disk" to "two separate
+guest OSes on one Windows host" — ruling out a directly dual-mounted
+partition and putting any file-sharing option (SMB, NFS) into SQLite's own
+documented danger zone (it explicitly warns against network filesystems for
+locking correctness).
+
+**Scope reduction (this revision):** the Hyper-V VM is now deferred, so
+there is only one environment (WSL) for this version — the cross-environment
+sharing problem itself doesn't exist yet. Options evaluated below are kept
+for the record and because the decision they led to (API server) is still
+what's being built now, just serving one local client instead of several:
+- *SMB share + app-level lock file* — moot without a second environment,
+  and was already flagged as throwaway once multi-computer access is
   wanted, since a shared-file model doesn't extend to real multi-user.
 - **Request-handling API server** — a single small server process is the
-  *only* thing that ever opens the SQLite file. Every environment (WSL, the
-  VM, and any future computer) is a client of it over HTTP. This removes
-  the network-filesystem locking risk entirely (only one process ever
-  touches the file — no cross-process locking to get wrong) and gives the
-  already-anticipated multi-user/multi-computer future a real boundary to
-  build on instead of a second migration later.
-- **Decision: request-handling API server.** More upfront scope than a
-  shared file, taken deliberately because it dissolves the locking problem
-  rather than working around it, and because multi-user support is already
-  flagged as wanted later — building the throwaway file-sharing version
-  first was judged not worth it. Confirmed with the user.
+  *only* thing that ever opens the SQLite file. For this version it has
+  exactly one client (the WSL TUI, over localhost), but the same boundary
+  is what the VM and any future computer will become clients of later,
+  and what the already-anticipated multi-user/multi-computer future needs
+  a real boundary to build on.
+- **Decision: request-handling API server, kept despite the reduced scope.**
+  More upfront cost than the TUI opening SQLite directly would be for a
+  single local environment, taken deliberately so this doesn't need a
+  second migration when the VM and multi-user work return — building the
+  throwaway direct-file version first was judged not worth it, same
+  reasoning as before the scope reduction. Confirmed with the user.
 
 ## Recommended approach
 Python + Textual for the TUI. SQLite as a single file, owned exclusively by
-a request-handling API server that runs as a persistent (systemd) service
-inside the Hyper-V Ubuntu VM — never opened directly by WSL, the TUI, or any
-other environment. Every environment talks to the server over HTTP. Code is
+a request-handling API server — never opened directly by the TUI or any
+other code. For this version, both the TUI and the server run locally
+inside WSL; the TUI talks to the server over HTTP on localhost. Code is
 layered (core domain logic → storage → external data-source seam → API
 server/client → TUI presentation) so Epic 8's GTK/Qt GUI can reuse
-everything except the presentation layer without a rewrite, and so a future
-multi-user version extends the existing client/server boundary instead of
-replacing the storage model.
+everything except the presentation layer without a rewrite, and so both a
+future native-Ubuntu/VM environment and a future multi-user version extend
+the existing client/server boundary instead of replacing the storage model.
 
 ## Key decisions
 - **Stack:** Python, Textual, stdlib `sqlite3`, FastAPI for the request-
@@ -85,18 +95,22 @@ replacing the storage model.
 - **Packaging:** `uv` (single tool for venv + deps + run). Reversible/low-risk
   choice — swapping to pip+venv or poetry later wouldn't touch the
   architecture, so this isn't gated on a spike.
-- **Where the server lives:** the Hyper-V VM, not WSL — WSL's default NAT
-  networking gives it an unstable IP (changes every restart, confirmed no
-  `.wslconfig` mirrored-networking override is set on this machine) and its
-  VM auto-shuts-down shortly after the last interactive session closes,
-  neither of which is acceptable for something meant to be always-on. The
-  VM behaves like a normal machine: static/reserved IP, systemd-managed
-  service, stays up independent of any terminal being open.
+- **Where the server lives (this version):** inside WSL, on localhost — the
+  concerns that previously ruled WSL out (unstable IP across restarts, VM
+  auto-shutdown after the last interactive session) applied to hosting a
+  server that a *separate* environment needs to reach reliably. With only
+  one environment for this version, they don't apply: the server only needs
+  to be reachable by a client in the same WSL instance, started when the
+  user starts working (via the `finance-tracker-server` entry point from
+  ticket 2), not as an always-on background service. **This is expected to
+  change again** when native Ubuntu/the VM returns — revisit "always-on,
+  stable IP" hosting at that point rather than building it now for a
+  client that doesn't exist yet.
 - **Data path resolution order (server-side only):** `FINANCE_TRACKER_DATA_DIR`
   env var → `~/.config/finance-tracker/config.toml` → XDG default
-  (`~/.local/share/finance-tracker/`), resolved once, on the VM, by the
-  server process. No other environment resolves a data path at all — they
-  only need the server's URL (see ticket breakdown for that config's own
+  (`~/.local/share/finance-tracker/`), resolved once, in WSL, by the
+  server process. No other code resolves a data path at all — the TUI only
+  needs the server's URL (see ticket breakdown for that config's own
   precedence order).
 - **Data model shape (conceptual, not final schema — real tables land in
   their owning epics):**
@@ -115,8 +129,9 @@ replacing the storage model.
     migrations, domain operations) is only ever reachable through this
     server process; no other code anywhere opens the DB file directly. The
     TUI talks to a thin API-client module, never to storage or SQL directly
-    — same rule Epic 8's future GUI will follow. This is what makes the
-    WSL/VM split (and later, multi-user) tractable without a locking hazard.
+    — same rule Epic 8's future GUI will follow. This is what will make a
+    future WSL/VM split (and later, multi-user) tractable without a locking
+    hazard, once that split exists again.
   - *Price data API* — isolated behind a thin seam in its own module; only
     the ASX code crosses this boundary (per PRD, holdings/quantities/values
     stay local). Real client and provider validation is Epic 2's job — Epic 1
@@ -131,25 +146,13 @@ replacing the storage model.
     machine) — revisit when multi-user support is built.
 
 ## Missing pieces & spikes
-- **Hyper-V VM setup (blocks the storage goal in practice):** no native
-  Ubuntu exists on this machine (confirmed — no dual boot). The VM itself
-  needs to be built: Windows edition is Pro (Hyper-V supported) and the
-  Hyper-V module/service appears to already be present (`Get-VM` failed on
-  an authorization error, not "cmdlet not found" — inconclusive without
-  elevated access, but suggestive), Ubuntu installed inside it, and the
-  request-handling server set up as a systemd service with a fixed IP. This
-  is genuine hands-on setup work, not a quick confirm — deliberately not
-  done inside a chat session; captured here as the plan, to be executed and
-  reported back on separately.
-- **WSL ↔ Hyper-V VM network reachability (new spike, part of the VM
-  setup):** unverified. WSL uses default NAT networking (confirmed: no
-  `.wslconfig`, no mirrored-networking override), which is a different
-  private network than whatever virtual switch the Hyper-V VM ends up on.
-  Whether WSL can reach the VM's IP out of the box, or needs an External
-  virtual switch (or WSL mirrored-networking mode) to bridge the two, needs
-  hands-on confirmation once the VM exists — before Epic 1's exit
-  verification (client TUI in WSL successfully calling the server in the
-  VM) can pass.
+- **Hyper-V VM setup — deferred, out of scope for this version.** No native
+  Ubuntu exists on this machine (confirmed — no dual boot); building it
+  (Windows edition is Pro, Hyper-V supported; Ubuntu install; systemd
+  service; fixed IP) is real hands-on work, but it's no longer blocking
+  Epic 1 since native Ubuntu itself was cut from this version's scope. Pick
+  this back up, along with the WSL↔VM network reachability spike it
+  contained, when native Ubuntu support returns.
 - **Price API spike** (already flagged in the PRD, belongs to Epic 2 not 1):
   validate the unofficial Yahoo Finance endpoint's reliability/coverage for
   `.AX` tickers before the real price-fetch service is built.
@@ -160,8 +163,8 @@ replacing the storage model.
 
 ## Open questions
 - Whether an External virtual switch (or WSL mirrored-networking mode) is
-  needed to make the VM reachable from WSL — resolved once the VM setup
-  spike above is done.
+  needed to make the VM reachable from WSL — deferred along with the VM
+  setup itself; revisit when native Ubuntu support returns.
 - The future GUI epic's assumption that WSLg forwards GTK/Qt apps to the
   Windows desktop automatically **does not hold for a Hyper-V VM** — WSLg is
   WSL-specific plumbing. Whatever "native Ubuntu" ends up meaning for Epic 8

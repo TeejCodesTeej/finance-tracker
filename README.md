@@ -16,21 +16,19 @@ uv sync
 This creates `.venv` and installs all dependencies (and dev dependencies,
 e.g. `ruff`) from `uv.lock`.
 
-Run the TUI:
+The TUI entry point is currently a placeholder:
 
 ```bash
 uv run finance-tracker
 ```
 
-Run the API server (the sole owner of the SQLite file — see the
-architecture doc's storage decision):
+The API server entry point is currently a placeholder:
 
 ```bash
 uv run finance-tracker-server
 ```
 
-For this version, both run locally inside WSL; the TUI talks to the
-server over HTTP on localhost.
+The entry points currently print placeholder messages and exit. No HTTP server is started for now.
 
 ### Linting
 

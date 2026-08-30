@@ -1,7 +1,7 @@
 [project]
 name = "finance-tracker"
 version = "0.1.0"
-description = "Add your description here"
+description = "ASX stock tracker for portfolio holdings, value, gain/loss, dividends, and price alerts"
 readme = "README.md"
 authors = [
     { name = "Teej", email = "tharanga.kast@gmail.com" }

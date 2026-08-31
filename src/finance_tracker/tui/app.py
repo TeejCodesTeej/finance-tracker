@@ -8,7 +8,7 @@ class FinanceTrackerApp(App):
     placeholder screen land in ticket 8.
     """
     
-    BINDINGS = [("d", "toggle_dark", "Toggle dark mode")]
+    BINDINGS = [("d", "toggle_dark", "Toggle dark mode"), ("q", "quit", "Quit")]
     
     def compose(self) -> ComposeResult:
         """Create placeholder child widgets for the app."""
